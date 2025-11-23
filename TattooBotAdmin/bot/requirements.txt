@@ -1,0 +1,7 @@
+python-telegram-bot==13.15
+requests==2.32.3
+python-dateutil==2.9.0.post0
+APScheduler==3.6.3
+pytz==2025.2
+captcha==0.6.0
+Pillow==11.0.0

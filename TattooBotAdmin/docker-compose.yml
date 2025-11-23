@@ -1,0 +1,100 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-postgres}
+      POSTGRES_DB: ${PGDATABASE:-tattooadmin}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-postgres} -d ${PGDATABASE:-tattooadmin}"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  app:
+    container_name: tattoobotadmin-app-1   # твой контейнер с админкой
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/tattooadmin
+      HOST: 0.0.0.0
+      PORT: "6050"
+      UPLOAD_DIR: /app/uploads
+      BOT_RESTART_SCRIPT: /scripts/restart-bot.sh
+      BOT_ENV_FILE: /project/bot-config/bot.env
+      PROJ_DIR: /project
+
+      # ---> ВАЖНО: эти 3 переменные нужны nginx-proxy + letsencrypt
+      VIRTUAL_HOST: tatto.shadownet.live
+      VIRTUAL_PORT: 6050
+      LETSENCRYPT_HOST: tatto.shadownet.live
+      LETSENCRYPT_EMAIL: shadownetvpn@outlook.com
+
+    user: "0:0"   # доступ к /var/run/docker.sock
+    volumes:
+      - ./:/project
+      - ./scripts:/scripts:ro
+      - ./uploads:/app/uploads       # том для медиа
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "6050"                       # порт доступен внутри сети докера, наружу не торчим
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: ./bot
+    image: tattoobotadmin-bot:latest
+    container_name: tatto_bot_host
+    restart: unless-stopped
+    env_file:
+      - ./bot-config/bot.env         # сюда скрипт пишет TELEGRAM_BOT_TOKEN
+    environment:
+      # бот стучится в админку по HTTPS-домену
+      API_BASE: https://tatto.shadownet.live
+    command: ["python", "/app/bot.py"]
+    tmpfs:
+      - /app/.env
+    depends_on:
+      app:
+        condition: service_started
+
+  # ---------- NGINX + Let's Encrypt авто ----------
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/vhost.d:/etc/nginx/vhost.d
+      - ./nginx/html:/usr/share/nginx/html
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    restart: unless-stopped
+
+  nginx-proxy-acme:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: nginx-proxy-acme
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx-proxy
+      - DEFAULT_EMAIL=shadownetvpn@outlook.com
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs
+      - ./nginx/vhost.d:/etc/nginx/vhost.d
+      - ./nginx/html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    depends_on:
+      - nginx-proxy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

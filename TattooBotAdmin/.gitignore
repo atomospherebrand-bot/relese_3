@@ -1,0 +1,12 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+uploads/
+.local
+data/database.json
+
+# не коммитим токен
+bot-config/bot.env
+.env
