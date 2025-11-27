@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
 import { type BotAction } from "@shared/schema";
 
 interface BotCommandResult {
@@ -42,10 +44,14 @@ class BotManager {
   }
 
   private resolveCommand(action: BotAction): string | undefined {
+    const cwdScript = path.join(process.cwd(), "scripts", "restart-bot.sh");
+    const stopScript = process.env.BOT_STOP_SCRIPT;
+    const restartScript = process.env.BOT_RESTART_SCRIPT || (fs.existsSync(cwdScript) ? cwdScript : undefined);
+
     if (action === "stop") {
-      return process.env.BOT_STOP_SCRIPT || process.env.BOT_RESTART_SCRIPT;
+      return stopScript || restartScript;
     }
-    return process.env.BOT_RESTART_SCRIPT;
+    return restartScript;
   }
 
   private enqueueCommand(command: string, context: { previousToken: string; nextToken: string; action: Exclude<BotAction, "none"> }) {

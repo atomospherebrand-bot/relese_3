@@ -143,7 +143,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   async function notifyMasterAboutBooking(booking: any, storage: ReturnType<typeof getStorage>) {
     try {
-      const masterHandle = (booking?.masterTelegram || "").toString().trim();
+      const masterHandle = (booking?.masterTelegram || booking?.masterNickname || "").toString().trim();
       if (!masterHandle) return;
 
       const settings = await storage.getSettings();

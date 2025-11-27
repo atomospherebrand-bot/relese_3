@@ -33,6 +33,7 @@ export default function SchedulePage() {
   const [defStart, setDefStart] = React.useState("10:00");
   const [defEnd, setDefEnd] = React.useState("20:00");
   const defaultsRef = React.useRef({ start: "10:00", end: "20:00" });
+  const pendingTimers = React.useRef<Record<string, NodeJS.Timeout>>({});
   const [err, setErr] = React.useState<string | null>(null);
 
   const applyUpdate = React.useCallback(
@@ -63,6 +64,12 @@ export default function SchedulePage() {
       const first = (d.masters || []).find(m => m.isActive) || (d.masters || [])[0];
       if (first?.id) setSelectedMaster(first.id);
     }).catch(e => setErr(String(e)));
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      Object.values(pendingTimers.current).forEach((t) => clearTimeout(t));
+    };
   }, []);
 
   React.useEffect(() => {
@@ -137,7 +144,16 @@ export default function SchedulePage() {
     const k = dayKey(d);
     const cur = map[k] || { isWorking: true };
     const next = { ...cur, isWorking: true, start, end };
-    applyUpdate({ [k]: next });
+    setMap((prev) => ({ ...prev, [k]: next }));
+
+    if (pendingTimers.current[k]) {
+      clearTimeout(pendingTimers.current[k]);
+    }
+
+    pendingTimers.current[k] = setTimeout(() => {
+      applyUpdate({ [k]: next });
+      delete pendingTimers.current[k];
+    }, 5000);
   };
 
   return (
