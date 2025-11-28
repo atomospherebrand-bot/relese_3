@@ -5,6 +5,7 @@ server/public
 vite.config.ts.*
 uploads/
 .local
+data/
 data/database.json
 
 # не коммитим токен

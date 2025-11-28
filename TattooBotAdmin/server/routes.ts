@@ -160,7 +160,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      const chatId = masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`;
+      let chatId: string | number = masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`;
+      try {
+        const lookup = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId }),
+        });
+        if (lookup.ok) {
+          const payload = await lookup.json();
+          const resolved = payload?.result?.id;
+          if (resolved) chatId = resolved;
+        }
+      } catch (e) {
+        console.warn("[notify-master] getChat failed", e);
+      }
       const when = `${booking.date ?? ""}${booking.time ? ` • ${booking.time}` : ""}`;
       const text =
         `Новая заявка от клиента.\n\n` +

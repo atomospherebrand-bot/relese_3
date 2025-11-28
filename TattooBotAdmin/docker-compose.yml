@@ -43,6 +43,7 @@ services:
       - ./:/project
       - ./scripts:/scripts:ro
       - ./uploads:/app/uploads       # том для медиа
+      - ./data:/app/data             # сохраняем график, акции и настройки
       - /var/run/docker.sock:/var/run/docker.sock
     expose:
       - "6050"                       # порт доступен внутри сети докера, наружу не торчим
