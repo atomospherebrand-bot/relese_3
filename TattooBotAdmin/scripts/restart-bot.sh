@@ -26,6 +26,8 @@ BOT_ENV_FILE="${BOT_ENV_FILE:-/project/bot-config/bot.env}"
 # имя сервиса бота в docker-compose.yml
 COMPOSE_SERVICE_BOT="${COMPOSE_SERVICE_BOT:-bot}"
 COMPOSE_SERVICE_APP="${COMPOSE_SERVICE_APP:-app}"
+# имя проекта docker-compose; если не задано, жёстко ставим, чтобы не плодить project-db-1
+PROJECT_NAME="${COMPOSE_PROJECT_NAME:-tattoobotadmin}"
 
 # если /project недоступен (например, другой путь монтирования), пробуем взять каталог скрипта
 if [ ! -d "$PROJ_DIR" ]; then
@@ -40,6 +42,7 @@ if [ ! -d "$PROJ_DIR" ]; then
   exit 1
 fi
 log "project dir entries: $(ls -1 "$PROJ_DIR" | head -n 20 | tr '\n' ' ')"
+log "compose project: $PROJECT_NAME"
 
 SELF_CONTAINER="$(hostname 2>/dev/null || true)"
 
@@ -73,7 +76,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 run_compose(){
-  CMD="$COMPOSE_BIN $*"
+  CMD="$COMPOSE_BIN -p $PROJECT_NAME $*"
   log "compose: $CMD"
   # пишем и в лог, и в stdout, чтобы было видно в контейнерных логах
   if ! sh -c "$CMD" 2>&1 | tee -a "$LOG_FILE"; then

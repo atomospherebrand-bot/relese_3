@@ -32,6 +32,7 @@ services:
       BOT_ENV_FILE: /project/bot-config/bot.env
       PROJ_DIR: /project
       RESTART_ALL_ON_TOKEN_CHANGE: "1"
+      COMPOSE_PROJECT_NAME: tattoobotadmin
 
       # ---> ВАЖНО: эти 3 переменные нужны nginx-proxy + letsencrypt
       VIRTUAL_HOST: tatto.shadownet.live
