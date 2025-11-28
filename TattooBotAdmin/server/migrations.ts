@@ -147,13 +147,9 @@ export async function runMigrations(db: NodePgDatabase<any>): Promise<void> {
   await addColumnIfMissing(db, "masters", "avatar", '"avatar" text');
   await addColumnIfMissing(db, "masters", "teletype_url", '"teletype_url" text');
   await addColumnIfMissing(db, "masters", "is_active", '"is_active" boolean DEFAULT true');
-  await addColumnIfMissing(db, "masters", "created_at", '"created_at" timestamptz DEFAULT now()');
   await db.execute(sql`UPDATE masters SET is_active = true WHERE is_active IS NULL;`);
   await db.execute(sql`ALTER TABLE masters ALTER COLUMN is_active SET DEFAULT true;`);
   await db.execute(sql`ALTER TABLE masters ALTER COLUMN is_active SET NOT NULL;`);
-  await db.execute(sql`UPDATE masters SET created_at = now() WHERE created_at IS NULL;`);
-  await db.execute(sql`ALTER TABLE masters ALTER COLUMN created_at SET DEFAULT now();`);
-  await db.execute(sql`ALTER TABLE masters ALTER COLUMN created_at SET NOT NULL;`);
   await db.execute(sql`ALTER TABLE masters ALTER COLUMN id SET DEFAULT uuid_generate_v4();`);
 
   await addColumnIfMissing(db, "settings", "yandex_map_url", '"yandex_map_url" text');

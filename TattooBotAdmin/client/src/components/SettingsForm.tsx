@@ -2,8 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Download, Save, UploadCloud } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Save } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,9 +13,6 @@ export function SettingsForm() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -70,47 +67,6 @@ export function SettingsForm() {
   const handleSave = () => {
     if (!settings) return;
     saveMutation.mutate(settings);
-  };
-
-  const handleExportBackup = async () => {
-    try {
-      setIsExporting(true);
-      const blob = await api.exportBackup();
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `tattoo-backup-${stamp}.zip`;
-      link.click();
-      URL.revokeObjectURL(url);
-      toast({ title: "Бэкап создан", description: "Архив выгружен" });
-    } catch (error) {
-      toast({
-        title: "Не удалось выгрузить архив",
-        description: error instanceof Error ? error.message : String(error),
-        variant: "destructive",
-      });
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
-  const handleImportBackup = async (file: File) => {
-    try {
-      setIsImporting(true);
-      await api.importBackup(file);
-      toast({ title: "Бэкап восстановлен", description: "Настройки и база перезаписаны из архива" });
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-    } catch (error) {
-      toast({
-        title: "Не удалось восстановить архив",
-        description: error instanceof Error ? error.message : String(error),
-        variant: "destructive",
-      });
-    } finally {
-      setIsImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
   };
 
   if (settingsQuery.isLoading || !settings) {
@@ -296,54 +252,6 @@ export function SettingsForm() {
           </CardContent>
         </Card>
       </div>
-
-      <Card className="border-white/10 bg-[#121722] text-white">
-        <CardHeader>
-          <CardTitle>Резервные копии</CardTitle>
-          <p className="text-sm text-white/50">Экспортирует БД, настройки, файлы загрузок и bot.env в один архив.</p>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1 text-sm text-white/70">
-            <p>Экспорт и импорт выполняются целиком. При восстановлении текущие данные будут перезаписаны.</p>
-            <p className="text-xs text-amber-300">Перед импортом сделайте свежий бэкап на всякий случай.</p>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Button
-              type="button"
-              onClick={handleExportBackup}
-              disabled={isExporting}
-              className="bg-emerald-600 hover:bg-emerald-500"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              {isExporting ? "Готовим архив…" : "Экспорт"}
-            </Button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".zip"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  handleImportBackup(file);
-                }
-              }}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isImporting}
-              className="bg-indigo-700 text-white hover:bg-indigo-600"
-            >
-              <UploadCloud className="mr-2 h-4 w-4" />
-              {isImporting ? "Импортируем…" : "Импорт архива"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

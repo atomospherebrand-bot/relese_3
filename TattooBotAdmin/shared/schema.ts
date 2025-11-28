@@ -31,7 +31,6 @@ export const mastersTable = pgTable("masters", {
   avatar: text("avatar"),
   teletypeUrl: text("teletype_url"),
   isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
 });
 
 /** SERVICES */
@@ -123,7 +122,6 @@ export const masterSchema = z.object({
     .optional(),
   teletypeUrl: z.string().optional(),
   isActive: z.boolean(),
-  createdAt: z.string().optional(),
 });
 export const insertMasterSchema = masterSchema.omit({ id: true });
 
@@ -141,8 +139,8 @@ export const bookingSchema = z.object({
   id: z.string(),
   clientName: z.string().min(1),
   clientPhone: z.string().min(1),
-  clientTelegram: z.string().optional().nullable(),
-  clientUsername: z.string().optional().nullable(),
+  clientTelegram: z.string().optional(),
+  clientUsername: z.string().optional(),
   telegramId: z.union([z.string(), z.number()]).optional(),
   masterId: z.string(),
   masterName: z.string(),

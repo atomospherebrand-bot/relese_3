@@ -5,7 +5,6 @@ import { setupVite, serveStatic, log } from "./vite";
 import path from "path";
 import fs from "fs";
 import uploadRouter from "./routes/upload";
-import { startReminderScheduler } from "./reminderScheduler";
 
 import { db } from "./db";
 import { runMigrations } from "./migrations";
@@ -63,7 +62,7 @@ app.use((req, res, next) => {
   const started = Date.now();
   const p = req.path;
   res.on("finish", () => {
-    if (!p.startsWith("/api") || p === "/api/health") return;
+    if (!p.startsWith("/api")) return;
     const status = res.statusCode;
     let line = `${req.method} ${p} ${status} in ${Date.now() - started}ms`;
     if (status >= 400) {
@@ -79,7 +78,6 @@ app.use((req, res, next) => {
   await runMigrations(db);
 
   getStorage();
-  startReminderScheduler();
 
   const server = await registerRoutes(app);
 

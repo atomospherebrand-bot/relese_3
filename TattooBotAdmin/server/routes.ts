@@ -30,10 +30,8 @@ import portfolioRouter from "./routes/portfolio";
 import botRouter from "./routes/bot";
 import { attachNotificationRoutes } from "./routes.notify";
 import { attachStatsRoutes } from "./routes.stats";
-import { attachBackupRoutes } from "./routes/backup";
 
 const upload = multer({ storage: multer.memoryStorage() });
-const BOT_TZ = process.env.TZ || "Europe/Moscow";
 
 const asyncHandler = (handler: RequestHandler): RequestHandler => {
   return (req, res, next) => {
@@ -58,7 +56,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const storage = getStorage();
   attachStatsRoutes(api);
   attachNotificationRoutes(api);
-  attachBackupRoutes(api);
 
   // === TELEGRAM notify helper ===
   const applyPlaceholders = (text: string, replacements: Record<string, string | undefined>): string => {
@@ -140,46 +137,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch {}
     } catch (e) {
       console.warn("notifyTelegramOnStatus failed", e);
-    }
-  }
-
-  async function notifyMasterAboutBooking(booking: any, storage: ReturnType<typeof getStorage>) {
-    try {
-      const masterHandle = (booking?.masterTelegram || booking?.masterNickname || "").toString().trim();
-      if (!masterHandle) return;
-
-      const settings = await storage.getSettings();
-      const token = (settings as any)?.botToken || process.env.BOT_TOKEN || process.env.TELEGRAM_TOKEN;
-      if (!token) return;
-
-      const chatId = masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`;
-      const time = (booking?.time || "").toString();
-      const timePart = time.length > 5 ? time.slice(0, 5) : time;
-      const when = new Date(`${booking.date}T${timePart}:00`);
-      const formatted = when.toLocaleString("ru-RU", {
-        timeZone: BOT_TZ,
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
-      const text =
-        `Новая заявка от ${booking.clientName || "клиент"}!\n\n` +
-        `Услуга: ${booking.service || booking.serviceId}\n` +
-        `Время: ${formatted}\n` +
-        `Телефон: ${booking.clientPhone || "не указан"}\n` +
-        (booking.clientTelegram ? `TG: @${String(booking.clientTelegram).replace(/^@/, "")}\n` : "") +
-        (booking.clientUsername ? `Логин: @${String(booking.clientUsername).replace(/^@/, "")}\n` : "");
-
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text }),
-      });
-    } catch (error) {
-      console.warn("[notify] master notify failed", error);
     }
   }
 
@@ -322,7 +279,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload = insertBookingSchema.parse(req.body);
       const booking = await storage.createBooking(payload);
       res.status(201).json({ booking });
-      notifyMasterAboutBooking(booking, storage);
     }),
   );
 

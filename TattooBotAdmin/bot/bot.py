@@ -59,16 +59,18 @@ auth_header = base64.b64encode(f"{AUTH[0]}:{AUTH[1]}".encode()).decode()
 
 def send_photo_safe(target, url_or_path, caption, kb):
     try:
-        return target.reply_photo(url_or_path, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+        target.reply_photo(url_or_path, caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+        return
     except Exception as e:
         try:
             import requests, io
             r = requests.get(url_or_path, timeout=10)
             if r.ok and r.content:
-                return target.reply_photo(InputFile(io.BytesIO(r.content), filename='image.jpg'), caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+                target.reply_photo(InputFile(io.BytesIO(r.content), filename='image.jpg'), caption=caption, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+                return
         except Exception as e2:
             log.warning(f"send_photo_safe: fallback failed: {e2}")
-    return target.reply_text(caption, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+    target.reply_text(caption, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
 
 
 # ===== messages cache =====
@@ -81,41 +83,14 @@ TERMS_DEFAULT = (
 )
 
 
-def _cleanup_menu_messages(ctx: CallbackContext | None, chat_id: int, keep: list[int] | None = None):
-    if not ctx:
-        return
-    keep_ids = set(keep or [])
-    stored = ctx.chat_data.get("menu_messages", [])
-    remaining = []
-    for mid in stored:
-        if mid in keep_ids:
-            remaining.append(mid)
-            continue
-        try:
-            ctx.bot.delete_message(chat_id=chat_id, message_id=mid)
-        except Exception as e:
-            log.debug("delete stale menu failed: %s", e)
-    ctx.chat_data["menu_messages"] = remaining
-
-
-def _remember_menu_message(ctx: CallbackContext | None, message):
-    if not ctx or not message:
-        return
-    ctx.chat_data["menu_messages"] = [message.message_id]
-
-
-def edit_or_send_new(q, text, *, parse_mode=None, reply_markup=None, ctx: CallbackContext | None = None):
+def edit_or_send_new(q, text, *, parse_mode=None, reply_markup=None):
     """Safely replace the current callback message regardless of its media type."""
-    chat_id = getattr(q.message, "chat_id", None)
-    if ctx and chat_id:
-        _cleanup_menu_messages(ctx, chat_id, keep=[q.message.message_id])
     try:
-        msg = q.edit_message_text(
+        q.edit_message_text(
             text,
             parse_mode=parse_mode,
             reply_markup=reply_markup,
         )
-        _remember_menu_message(ctx, msg or q.message)
         return
     except Exception as e:
         msg = str(e).lower()
@@ -127,15 +102,12 @@ def edit_or_send_new(q, text, *, parse_mode=None, reply_markup=None, ctx: Callba
     except Exception:
         pass
 
-    if ctx and chat_id:
-        _cleanup_menu_messages(ctx, chat_id)
-    sent = q.message.bot.send_message(
+    q.message.bot.send_message(
         chat_id=q.message.chat_id,
         text=text,
         parse_mode=parse_mode,
         reply_markup=reply_markup,
     )
-    _remember_menu_message(ctx, sent)
 
 def safe_get_messages():
     try:
@@ -257,21 +229,6 @@ def api_post(path, payload):
             except: pass
             last_err = e
     log.error(f"All API post attempts failed: {last_err}")
-    raise last_err
-
-def api_patch(path, payload):
-    last_err = None
-    for base in API_CANDIDATES:
-        if not base: continue
-        try:
-            full_url = f"{base}{path}"
-            log.debug(f"Attempting API patch: {full_url}")
-            r = requests.patch(full_url, json=payload, timeout=15, headers={"Authorization": f"Basic {auth_header}"})
-            r.raise_for_status()
-            return r.json() if r.content else {}
-        except Exception as e:
-            last_err = e
-    log.error(f"All API patch attempts failed: {last_err}")
     raise last_err
 
 def safe_get_settings():
@@ -465,37 +422,16 @@ def money(v: int) -> str:
 def has_future_booking_for_user(user_id: int) -> bool:
     now = datetime.now(tz=TZ)
     for b in safe_get_bookings():
+        uid = b.get("userId") or b.get("telegramId")
         status = (b.get("status") or "").lower()
-        if status not in ("pending", "confirmed"):
-            continue
-
-        uid = b.get("userId") or b.get("telegramId") or b.get("clientUsername")
-        if str(uid) != str(user_id):
-            continue
-
-        date_part = b.get("date")
-        time_part = (b.get("time") or "")[:5]
-        dt = None
-        if date_part and time_part:
+        if uid == user_id and status not in ("canceled", "cancelled", "done", "completed"):
+            dt = b.get("dateTime") or b.get("start") or b.get("date")
             try:
-                dt = datetime.fromisoformat(f"{date_part}T{time_part}")
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=TZ)
-            except Exception:
-                dt = None
-
-        if not dt:
-            raw_dt = b.get("dateTime") or b.get("start")
-            if raw_dt:
-                try:
-                    dt = datetime.fromisoformat(str(raw_dt).replace("Z", "+00:00"))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=TZ)
-                except Exception:
-                    dt = None
-
-        if dt and dt >= now:
-            return True
+                t = datetime.fromisoformat(dt.replace("Z","+00:00") if "Z" in str(dt) else dt)
+                if t.tzinfo is None: t = t.replace(tzinfo=TZ)
+                if t >= now:
+                    return True
+            except: pass
     return False
 
 # ===== ui =====
@@ -645,38 +581,26 @@ def send_home_text(update_or_query, ctx: CallbackContext):
     welcome_img = bot_image("welcome")
     kb = kb_main()
     if getattr(update_or_query, "message", None):
-        chat_id = update_or_query.effective_chat.id
-        _cleanup_menu_messages(ctx, chat_id)
-        sent = None
         if welcome_img:
             try:
-                sent = send_photo_safe(update_or_query.message, welcome_img, welcome_text, kb)
+                send_photo_safe(update_or_query.message, welcome_img, welcome_text, kb)
             except Exception as e:
                 log.warning("send_photo failed, fallback to text: %s", e)
-                sent = update_or_query.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+                update_or_query.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
         else:
-            sent = update_or_query.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-        _remember_menu_message(ctx, sent)
+            update_or_query.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
     else:
         q = update_or_query.callback_query
         if welcome_img:
             try:
-                _cleanup_menu_messages(ctx, q.message.chat_id, keep=[q.message.message_id])
                 # edit message media if possible, else send new
-                sent = send_photo_safe(q.message, welcome_img, welcome_text, kb)
-                try:
-                    q.delete_message()
-                except Exception:
-                    pass
-                _remember_menu_message(ctx, sent)
+                send_photo_safe(q.message, welcome_img, welcome_text, kb)
+                q.delete_message()
             except Exception as e:
                 log.warning("edit to photo failed: %s", e)
-                msg = q.edit_message_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-                _remember_menu_message(ctx, msg or q.message)
+                q.edit_message_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
         else:
-            _cleanup_menu_messages(ctx, q.message.chat_id, keep=[q.message.message_id])
-            msg = q.edit_message_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-            _remember_menu_message(ctx, msg or q.message)
+            q.edit_message_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
 
 # ===== entry for booking is INSIDE ConversationHandler =====
 def entry_book(update, ctx: CallbackContext):
@@ -697,7 +621,6 @@ def entry_book(update, ctx: CallbackContext):
                 "У тебя уже есть активная запись. Если нужно изменить время — напиши администратору или дождись завершения визита.",
             ),
             reply_markup=kb_back_home(),
-            ctx=ctx,
         )
         return ConversationHandler.END
 
@@ -707,7 +630,6 @@ def entry_book(update, ctx: CallbackContext):
             q,
             bot_text("no_services", "Нет доступных услуг. Попробуй позже."),
             reply_markup=kb_back_home(),
-            ctx=ctx,
         )
         return ConversationHandler.END
 
@@ -719,7 +641,6 @@ def entry_book(update, ctx: CallbackContext):
         q,
         bot_text("choose_service", "Выбери услугу:"),
         reply_markup=InlineKeyboardMarkup(kb),
-        ctx=ctx,
     )
     return S_SVC
 
@@ -732,12 +653,7 @@ def pick_service(update, ctx: CallbackContext):
 
     masters = [m for m in safe_get_masters() if m.get("isActive", True)]
     if not masters:
-        edit_or_send_new(
-            q,
-            bot_text("no_active_masters", "Пока нет активных мастеров."),
-            reply_markup=kb_back_home(),
-            ctx=ctx,
-        )
+        edit_or_send_new(q, bot_text("no_active_masters", "Пока нет активных мастеров."), reply_markup=kb_back_home())
         return ConversationHandler.END
 
     ctx.user_data["masters"] = {str(m["id"]): m for m in masters if m.get("id")}
@@ -759,7 +675,7 @@ def pick_service(update, ctx: CallbackContext):
         },
     )
 
-    edit_or_send_new(q, intro, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows), ctx=ctx)
+    edit_or_send_new(q, intro, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(rows))
     return S_MASTER
 
 def pick_date(update, ctx: CallbackContext):
@@ -777,7 +693,6 @@ def pick_date(update, ctx: CallbackContext):
             q,
             bot_text("no_slots_for_day", "Свободных слотов нет. Выберите другую дату."),
             reply_markup=kb_back_home(),
-            ctx=ctx,
         )
         return S_DATE
 
@@ -792,7 +707,6 @@ def pick_date(update, ctx: CallbackContext):
         q,
         bot_text("choose_time", "Выбери время:"),
         reply_markup=InlineKeyboardMarkup(rows),
-        ctx=ctx,
     )
     return S_TIME
 
@@ -809,7 +723,6 @@ def pick_time(update, ctx: CallbackContext):
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("↩️ Назад", callback_data=f"d:{ctx.user_data['date']}")]]
         ),
-        ctx=ctx,
     )
     return S_NAME
 
@@ -832,12 +745,7 @@ def pick_master(update, ctx: CallbackContext):
             available_days.append(d)
 
     if not available_days:
-        edit_or_send_new(
-            q,
-            bot_text("no_slots_any", "Свободных слотов нет в ближайшее время."),
-            reply_markup=kb_back_home(),
-            ctx=ctx,
-        )
+        edit_or_send_new(q, bot_text("no_slots_any", "Свободных слотов нет в ближайшее время."), reply_markup=kb_back_home())
         return ConversationHandler.END
 
     rows, row = [], []
@@ -864,7 +772,6 @@ def pick_master(update, ctx: CallbackContext):
         ),
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(rows),
-        ctx=ctx,
     )
     return S_DATE
 
@@ -913,11 +820,6 @@ def finalize_booking(update, ctx: CallbackContext):
         "clientUsername": update.effective_user.username,
         "telegramId": update.effective_user.id,
     }
-
-    try:
-        _cleanup_menu_messages(ctx, update.effective_chat.id)
-    except Exception:
-        pass
 
     created = safe_create_booking(payload)
     if not created:
@@ -1080,21 +982,6 @@ def btn(update, ctx: CallbackContext):
     q.answer()
     data = q.data
 
-    if data.startswith("cancel:"):
-        booking_id = data.split(":", 1)[1]
-        try:
-            api_patch(f"/api/bookings/{booking_id}/status", {"status": "cancelled"})
-            _cleanup_menu_messages(ctx, q.message.chat_id, keep=[q.message.message_id])
-            msg = q.edit_message_text(
-                bot_text("booking_cancelled", "Запись отменена. Буду рад помочь подобрать новое время."),
-                reply_markup=kb_back_home(),
-            )
-            _remember_menu_message(ctx, msg or q.message)
-        except Exception as e:
-            log.warning("cancel booking failed: %s", e)
-            q.answer("Не удалось отменить запись. Попробуй позже.", show_alert=True)
-        return
-
     if data == "home":
         send_home_text(update, ctx)
         return
@@ -1180,7 +1067,7 @@ def btn(update, ctx: CallbackContext):
         s = safe_get_settings()
         masters = safe_get_masters(include_inactive=True)
         if not masters:
-            edit_or_send_new(q, "Пока нет мастеров.", reply_markup=kb_back_home(), ctx=ctx)
+            edit_or_send_new(q, "Пока нет мастеров.", reply_markup=kb_back_home())
             return
 
         from telegram.utils.helpers import escape_markdown

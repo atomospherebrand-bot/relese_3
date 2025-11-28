@@ -516,29 +516,4 @@ export const api = {
   async deleteCertificate(id: string): Promise<void> {
     await request<void>(`/certs/${id}`, { method: "DELETE" });
   },
-
-  async exportBackup(): Promise<Blob> {
-    const response = await fetch(`${BASE_URL}/backup/export`, { credentials: "same-origin" });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || "Не удалось выгрузить резервную копию");
-    }
-    return await response.blob();
-  },
-
-  async importBackup(file: File): Promise<void> {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await fetch(`${BASE_URL}/backup/import`, {
-      method: "POST",
-      body: formData,
-      credentials: "same-origin",
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || "Не удалось восстановить резервную копию");
-    }
-  },
 };

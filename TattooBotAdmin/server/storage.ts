@@ -59,7 +59,6 @@ const CERTS_FILE = path.join(DATA_DIR, "certs.json");
 const CLIENTS_FILE = path.join(DATA_DIR, "clients.json");
 const CLIENT_PROFILES_FILE = path.join(DATA_DIR, "client_profiles.json");
 const AVAILABILITY_FILE = path.join(DATA_DIR, "availability.json");
-const DEFAULT_TZ = process.env.TZ || "Europe/Moscow";
 
 type DaySchedule = {
   isWorking: boolean;
@@ -99,46 +98,6 @@ const availabilityRecordSchema = z.union([
 ]);
 
 const availabilitySchema = z.record(z.string(), availabilityRecordSchema);
-
-function normalizeDateValue(value: unknown): string {
-  if (!value) return "";
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  const str = String(value);
-  return str.length >= 10 ? str.slice(0, 10) : "";
-}
-
-function normalizeTimeValue(value: unknown): string {
-  if (!value) return "";
-  if (value instanceof Date) return value.toISOString().slice(11, 16);
-  const str = String(value);
-  return str.length >= 5 ? str.slice(0, 5) : "";
-}
-
-function nowInTz() {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("sv-SE", {
-      timeZone: DEFAULT_TZ,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-      .formatToParts(new Date())
-      .map((p) => [p.type, p.value]),
-  );
-
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    time: `${parts.hour}:${parts.minute}`,
-  };
-}
-
-function isFutureSlot(date: string, time: string, nowDate: string, nowTime: string): boolean {
-  if (!date || !time) return false;
-  return date > nowDate || (date === nowDate && time >= nowTime);
-}
 
 function compareTimes(left: string, right: string): number {
   return left.localeCompare(right, "en");
@@ -724,10 +683,6 @@ export class DatabaseStorage {
       avatar: optional(row.avatar),
       teletypeUrl: optional(row.teletypeUrl),
       isActive: row.isActive,
-      createdAt:
-        row.createdAt instanceof Date
-          ? row.createdAt.toISOString()
-          : (row.createdAt as string | undefined),
     });
   }
 
@@ -782,7 +737,7 @@ export class DatabaseStorage {
   }
 
   private normalizeBooking(row: BookingRow): Booking {
-    const timeValue = normalizeTimeValue(row.time);
+    const timeValue = row.time.length > 5 ? row.time.slice(0, 5) : row.time;
     return bookingSchema.parse({
       id: row.id,
       clientName: row.clientName,
@@ -848,10 +803,7 @@ export class DatabaseStorage {
 
   async listMasters(): Promise<Master[]> {
     await this.ensureReady();
-    const rows = await this.database
-      .select()
-      .from(mastersTable)
-      .orderBy(asc(mastersTable.createdAt), asc(mastersTable.name));
+    const rows = await this.database.select().from(mastersTable).orderBy(asc(mastersTable.name));
     return rows.map((row) => this.mapMaster(row));
   }
 
@@ -893,7 +845,7 @@ export class DatabaseStorage {
       .select()
       .from(mastersTable)
       .where(eq(mastersTable.isActive, true))
-      .orderBy(asc(mastersTable.createdAt), asc(mastersTable.name));
+      .orderBy(asc(mastersTable.name));
     return rows.map((row) => this.mapMaster(row));
   }
 
@@ -1050,27 +1002,40 @@ export class DatabaseStorage {
 
     const cleanedUsername = (payload.clientUsername ?? payload.clientTelegram ?? "").replace(/^@/, "");
     const cleanedTelegramId = payload.telegramId ? String(payload.telegramId) : undefined;
-    const contactFilters = [] as any[];
-    if (cleanedTelegramId) contactFilters.push(eq(bookingsTable.telegramId, cleanedTelegramId));
-    if (cleanedUsername) contactFilters.push(eq(bookingsTable.clientUsername, cleanedUsername));
-    if (payload.clientTelegram) contactFilters.push(eq(bookingsTable.clientTelegram, payload.clientTelegram));
-    if (payload.clientPhone) contactFilters.push(eq(bookingsTable.clientPhone, payload.clientPhone));
 
-    const identityMatcher = contactFilters.length > 0 ? or(...contactFilters) : sql`1=0`;
-    const { date: today, time: nowTime } = nowInTz();
+// Prevent multiple active future bookings by the same user (by telegram or phone)
+try {
+  const now = new Date();
+  const today = now.toISOString().slice(0,10);
+  const hh = String(now.getHours()).padStart(2,"0");
+  const mm = String(now.getMinutes()).padStart(2,"0");
+  const nowTime = hh + ":" + mm;
 
-    const byClient = await this.database
-      .select({ date: bookingsTable.date, time: bookingsTable.time })
-      .from(bookingsTable)
-      .where(and(identityMatcher, ne(bookingsTable.status, "cancelled")));
+      const byClient = await this.database
+        .select()
+        .from(bookingsTable)
+        .where(and(
+          or(
+            cleanedTelegramId ? eq(bookingsTable.telegramId, cleanedTelegramId) : sql`1=0`,
+            cleanedUsername ? eq(bookingsTable.clientUsername, cleanedUsername) : sql`1=0`,
+            payload.clientTelegram ? eq(bookingsTable.clientTelegram, payload.clientTelegram) : sql`1=0`,
+            payload.clientPhone ? eq(bookingsTable.clientPhone, payload.clientPhone) : sql`1=0`
+          ),
+          ne(bookingsTable.status, "cancelled")
+        ));
 
-    const hasActive = byClient.some((b) =>
-      isFutureSlot(normalizeDateValue(b.date), normalizeTimeValue(b.time), today, nowTime),
-    );
+  const hasActive = byClient.some((b: any) => {
+    const d = String(b.date);
+    const t = typeof b.time === "string" ? b.time.slice(0,5) : String(b.time);
+    return (d > today) || (d === today && t >= nowTime);
+  });
 
-    if (hasActive) {
-      throw new Error("У вас уже есть активная запись. Сначала завершите/отмените текущую.");
-    }
+  if (hasActive) {
+    throw new Error("У вас уже есть активная запись. Сначала завершите/отмените текущую.");
+  }
+} catch (e) {
+  // if anything goes wrong, do not block creating; but above throws explicit error
+}
 
 
     const serviceRows = await this.database

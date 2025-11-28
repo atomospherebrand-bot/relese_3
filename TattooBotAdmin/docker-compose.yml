@@ -32,7 +32,7 @@ services:
       BOT_ENV_FILE: /project/bot-config/bot.env
       PROJ_DIR: /project
 
-      # ---> ВАЖНО: эти 3 переменные нужны nginx
+      # ---> ВАЖНО: эти 3 переменные нужны nginx-proxy + letsencrypt
       VIRTUAL_HOST: tatto.shadownet.live
       VIRTUAL_PORT: 6050
       LETSENCRYPT_HOST: tatto.shadownet.live
@@ -43,15 +43,9 @@ services:
       - ./:/project
       - ./scripts:/scripts:ro
       - ./uploads:/app/uploads       # том для медиа
-      - ./data:/app/data             # том для расписания/акций и прочих json-данных
       - /var/run/docker.sock:/var/run/docker.sock
     expose:
       - "6050"                       # порт доступен внутри сети докера, наружу не торчим
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:6050/api/health || exit 1"]
-      timeout: 2s
-      interval: 5s
-      retries: 20
     restart: unless-stopped
 
   bot:
@@ -63,8 +57,8 @@ services:
     env_file:
       - ./bot-config/bot.env         # сюда скрипт пишет TELEGRAM_BOT_TOKEN
     environment:
-      # бот стучится в админку по внутреннему сервису, чтобы не зависеть от внешнего https
-      API_BASE: http://app:6050
+      # бот стучится в админку по HTTPS-домену
+      API_BASE: https://tatto.shadownet.live
     command: ["python", "/app/bot.py"]
     tmpfs:
       - /app/.env
@@ -72,20 +66,34 @@ services:
       app:
         condition: service_started
 
-  # ---------- NGINX статический, без доступа к другим проектам ----------
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: tatto-nginx
-    depends_on:
-      app:
-        condition: service_started
+  # ---------- NGINX + Let's Encrypt авто ----------
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginx-proxy
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
-      - ./nginx/dhparam:/etc/nginx/dhparam:ro
+      - ./nginx/vhost.d:/etc/nginx/vhost.d
+      - ./nginx/html:/usr/share/nginx/html
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    restart: unless-stopped
+
+  nginx-proxy-acme:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: nginx-proxy-acme
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx-proxy
+      - DEFAULT_EMAIL=shadownetvpn@outlook.com
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs
+      - ./nginx/vhost.d:/etc/nginx/vhost.d
+      - ./nginx/html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    depends_on:
+      - nginx-proxy
     restart: unless-stopped
 
 volumes:
