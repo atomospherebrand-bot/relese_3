@@ -25,6 +25,7 @@ PROJ_DIR="${PROJ_DIR:-/project}"
 BOT_ENV_FILE="${BOT_ENV_FILE:-/project/bot-config/bot.env}"
 # имя сервиса бота в docker-compose.yml
 COMPOSE_SERVICE_BOT="${COMPOSE_SERVICE_BOT:-bot}"
+COMPOSE_SERVICE_APP="${COMPOSE_SERVICE_APP:-app}"
 
 # если /project недоступен (например, другой путь монтирования), пробуем взять каталог скрипта
 if [ ! -d "$PROJ_DIR" ]; then
@@ -60,15 +61,7 @@ fi
 
 TOKEN="$TELEGRAM_BOT_TOKEN"
 ACTION="${TELEGRAM_BOT_ACTION:-restart}"
-FULL_RESTART="${RESTART_ALL_ON_TOKEN_CHANGE:-0}"
-
-# Если скрипт крутится внутри основного контейнера app, нельзя делать compose down —
-# контейнер самоуничтожится и скрипт завершится с ошибкой. В этом случае принудительно
-# оставляем только переcоздание сервиса бота.
-if [ "$SELF_CONTAINER" = "tattoobotadmin-app-1" ] && [ "$FULL_RESTART" = "1" ]; then
-  log "detected self container $SELF_CONTAINER, disabling full restart to avoid shutdown"
-  FULL_RESTART=0
-fi
+FULL_RESTART="${RESTART_ALL_ON_TOKEN_CHANGE:-1}"
 
 log "action=$ACTION full_restart=$FULL_RESTART token_len=${#TOKEN}"
 
@@ -82,8 +75,8 @@ fi
 run_compose(){
   CMD="$COMPOSE_BIN $*"
   log "compose: $CMD"
-  # записываем stdout/stderr в лог для последующей диагностики
-  if ! sh -c "$CMD" >>"$LOG_FILE" 2>&1; then
+  # пишем и в лог, и в stdout, чтобы было видно в контейнерных логах
+  if ! sh -c "$CMD" 2>&1 | tee -a "$LOG_FILE"; then
     log "ERROR: compose command failed (see $LOG_FILE)"
     exit 1
   fi
@@ -104,9 +97,14 @@ if docker ps -a --format '{{.Names}}' | grep -q "^tatto_bot_host$"; then
 fi
 
 if [ "$FULL_RESTART" = "1" ] && [ "$ACTION" != "stop" ]; then
-  log "full stack restart requested"
-  run_compose down --remove-orphans
-  run_compose up -d --build
+  log "full stack restart requested (force-recreate without down)"
+  run_compose up -d --build --force-recreate "$COMPOSE_SERVICE_BOT"
+  run_compose up -d --build --force-recreate nginx-proxy nginx-proxy-acme db || true
+  if [ "$SELF_CONTAINER" = "$COMPOSE_SERVICE_APP" ]; then
+    log "skipping app recreate because running inside $SELF_CONTAINER"
+  else
+    run_compose up -d --build --force-recreate "$COMPOSE_SERVICE_APP"
+  fi
 else
   log "stopping old bot container (if any)"
   run_compose stop "$COMPOSE_SERVICE_BOT" || true
