@@ -419,19 +419,46 @@ def money(v: int) -> str:
     except:
         return str(v)
 
-def has_future_booking_for_user(user_id: int) -> bool:
+def has_future_booking_for_user(user_id: int, username: str | None = None) -> bool:
+    """Check pending/confirmed future bookings by telegram id or username.
+
+    The API returns telegramId as a string, so we normalize everything to str
+    to avoid mismatches like 123 vs "123".
+    """
+
     now = datetime.now(tz=TZ)
+    uid_str = str(user_id)
+    username_clean = (username or "").lstrip("@").lower()
+
     for b in safe_get_bookings():
-        uid = b.get("userId") or b.get("telegramId")
         status = (b.get("status") or "").lower()
-        if uid == user_id and status not in ("canceled", "cancelled", "done", "completed"):
-            dt = b.get("dateTime") or b.get("start") or b.get("date")
-            try:
-                t = datetime.fromisoformat(dt.replace("Z","+00:00") if "Z" in str(dt) else dt)
-                if t.tzinfo is None: t = t.replace(tzinfo=TZ)
-                if t >= now:
-                    return True
-            except: pass
+        if status in ("canceled", "cancelled", "done", "completed"):
+            continue
+
+        booking_uid = b.get("telegramId") or b.get("userId")
+        booking_username = (b.get("clientUsername") or b.get("clientTelegram") or "").lstrip("@").lower()
+
+        matches_user = (booking_uid is not None and str(booking_uid) == uid_str) or (
+            username_clean and booking_username and booking_username == username_clean
+        )
+        if not matches_user:
+            continue
+
+        dt = b.get("dateTime") or b.get("start")
+        if not dt and b.get("date") and b.get("time"):
+            dt = f"{b['date']}T{b['time']}:00"
+
+        try:
+            if not dt:
+                continue
+            t = datetime.fromisoformat(dt.replace("Z", "+00:00") if "Z" in str(dt) else dt)
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=TZ)
+            if t >= now:
+                return True
+        except Exception:
+            continue
+
     return False
 
 # ===== ui =====
@@ -649,7 +676,7 @@ def entry_book(update, ctx: CallbackContext):
     if uid not in verified:
         return send_terms_and_captcha(update, uid)
 
-    if has_future_booking_for_user(uid):
+    if has_future_booking_for_user(uid, getattr(q.from_user, "username", None)):
         edit_or_send_new(
             q,
             bot_text(
