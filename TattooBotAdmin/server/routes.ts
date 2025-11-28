@@ -30,6 +30,7 @@ import portfolioRouter from "./routes/portfolio";
 import botRouter from "./routes/bot";
 import { attachNotificationRoutes } from "./routes.notify";
 import { attachStatsRoutes } from "./routes.stats";
+import { attachBackupRoutes } from "./routes/backup";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const BOT_TZ = process.env.TZ || "Europe/Moscow";
@@ -57,6 +58,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const storage = getStorage();
   attachStatsRoutes(api);
   attachNotificationRoutes(api);
+  attachBackupRoutes(api);
 
   // === TELEGRAM notify helper ===
   const applyPlaceholders = (text: string, replacements: Record<string, string | undefined>): string => {
