@@ -167,13 +167,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      if (!masterHandle) {
+      const savedChat = booking.masterId ? await storage.getMasterChat(booking.masterId) : undefined;
+
+      if (!masterHandle && !savedChat?.chatId) {
         console.warn(`${logPrefix} master has no telegram`, booking.masterId);
         return;
       }
 
-      let chatId: string | number = masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`;
-      console.log(`${logPrefix} resolving chat`, { masterId: booking.masterId, chatId });
+      let chatId: string | number = savedChat?.chatId ??
+        (masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`);
+      console.log(`${logPrefix} resolving chat`, { masterId: booking.masterId, chatId, masterHandle, savedChat });
       try {
         const lookup = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
           method: "POST",

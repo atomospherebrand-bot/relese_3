@@ -512,6 +512,40 @@ def notify_register_chat(booking_id: str, chat_id: int) -> None:
         log.debug("notify_register_chat failed: %s", e)
 
 
+def maybe_register_master_chat(user) -> None:
+    """Если пользователь — мастер студии, сохраним его chat_id для уведомлений."""
+    try:
+        username = (getattr(user, "username", "") or "").lstrip("@").lower()
+        if not username:
+            return
+
+        masters = safe_get_masters(include_inactive=True)
+        match = None
+        for m in masters:
+            tg = (m.get("telegram") or "").lstrip("@").lower()
+            nick = (m.get("nickname") or "").lstrip("@").lower()
+            if username and (username == tg or username == nick):
+                match = m
+                break
+
+        if not match or not match.get("id"):
+            return
+
+        api_post(
+            "/api/notifications/register-master",
+            {
+                "masterId": match.get("id"),
+                "chatId": getattr(user, "id", None),
+                "username": getattr(user, "username", None),
+            },
+        )
+        log.info(
+            "registered master chat", extra={"master": match.get("name"), "chatId": getattr(user, "id", None)}
+        )
+    except Exception as e:
+        log.warning("register master chat failed: %s", e)
+
+
 # ===== conversation states =====
 (
     S_CAPTCHA,     # капча при первом входе
@@ -531,6 +565,7 @@ captcha_codes = {}
 # ===== /start + captcha =====
 def cmd_start(update, ctx: CallbackContext):
     register_client_profile(update.effective_user)
+    maybe_register_master_chat(update.effective_user)
     uid = update.effective_user.id
     if uid in verified:
         send_home_text(update, ctx)
@@ -541,6 +576,7 @@ def cmd_start(update, ctx: CallbackContext):
 def on_start_button(update, ctx: CallbackContext):
     q = update.callback_query; q.answer()
     register_client_profile(q.from_user)
+    maybe_register_master_chat(q.from_user)
     uid = q.from_user.id
     if uid in verified:
         send_home_text(update, ctx)

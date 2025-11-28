@@ -2,6 +2,7 @@
 import type { Router, Request, Response, NextFunction } from "express";
 import fs from "fs";
 import path from "path";
+import { getStorage } from "./storage";
 
 // local tiny async wrapper to avoid depending on project's asyncHandler
 const wrap = (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) =>
@@ -26,6 +27,18 @@ export function attachNotificationRoutes(api: Router) {
     const map = readNotif();
     map[id] = { ...(map[id] || {}), chatId };
     writeNotif(map);
+    res.json({ ok: true });
+  }));
+
+  // POST /api/notifications/register-master { masterId, chatId, username? }
+  api.post("/notifications/register-master", wrap(async (req, res) => {
+    const masterId = String((req.body?.masterId) || "");
+    const chatId = req.body?.chatId;
+    const username = req.body?.username as string | undefined;
+    if (!masterId || !chatId) return res.status(400).json({ message: "masterId and chatId required" });
+
+    const storage = getStorage();
+    await storage.saveMasterChat(masterId, chatId, username);
     res.json({ ok: true });
   }));
 

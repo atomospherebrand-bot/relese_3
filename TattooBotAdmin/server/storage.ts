@@ -59,6 +59,7 @@ const CERTS_FILE = path.join(DATA_DIR, "certs.json");
 const CLIENTS_FILE = path.join(DATA_DIR, "clients.json");
 const CLIENT_PROFILES_FILE = path.join(DATA_DIR, "client_profiles.json");
 const AVAILABILITY_FILE = path.join(DATA_DIR, "availability.json");
+const MASTER_CHAT_FILE = path.join(DATA_DIR, "master_chats.json");
 
 type DaySchedule = {
   isWorking: boolean;
@@ -578,6 +579,17 @@ export class DatabaseStorage {
     console.log(`[data-store] saved ${path.relative(process.cwd(), file)}`);
   }
 
+  private readMasterChatMap(): Record<string, { chatId: string | number; username?: string }> {
+    return this.readDataFile<Record<string, { chatId: string | number; username?: string }>>(
+      MASTER_CHAT_FILE,
+      {},
+    );
+  }
+
+  private writeMasterChatMap(map: Record<string, { chatId: string | number; username?: string }>) {
+    this.writeDataFile(MASTER_CHAT_FILE, map);
+  }
+
   private readClientProfiles(): Record<string, any> {
     return this.readDataFile<Record<string, any>>(CLIENT_PROFILES_FILE, {});
   }
@@ -619,6 +631,20 @@ export class DatabaseStorage {
       days: Object.fromEntries(Object.entries(days).filter(([date]) => date.startsWith(prefix))),
       defaults: record.defaults,
     };
+  }
+
+  async saveMasterChat(masterId: string, chatId: string | number, username?: string) {
+    await this.ensureReady();
+    const map = this.readMasterChatMap();
+    map[masterId] = { chatId, username };
+    this.writeMasterChatMap(map);
+    return map[masterId];
+  }
+
+  async getMasterChat(masterId: string) {
+    await this.ensureReady();
+    const map = this.readMasterChatMap();
+    return map[masterId];
   }
 
   async updateMasterAvailability(
