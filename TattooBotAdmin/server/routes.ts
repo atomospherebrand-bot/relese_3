@@ -61,6 +61,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   attachStatsRoutes(api);
   attachNotificationRoutes(api);
 
+  const botEnvFile = process.env.BOT_ENV_FILE || path.resolve(process.cwd(), "bot-config/bot.env");
+  const skipBotRestart = process.env.SKIP_BOT_RESTART_SCRIPT === "1";
+
+  const persistBotToken = (token: string) => {
+    try {
+      fs.mkdirSync(path.dirname(botEnvFile), { recursive: true });
+      fs.writeFileSync(botEnvFile, `TELEGRAM_BOT_TOKEN=${token ?? ""}\n`, "utf8");
+      console.info(`[bot] token persisted to ${botEnvFile}`);
+    } catch (error) {
+      console.error("[bot] failed to write bot env file", botEnvFile, error);
+    }
+  };
+
   // === TELEGRAM notify helper ===
   const applyPlaceholders = (text: string, replacements: Record<string, string | undefined>): string => {
     return Object.entries(replacements).reduce(
@@ -513,11 +526,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const previousSettings = await storage.getSettings();
       const settings = await storage.saveSettings(payload);
 
+      if (settings.botToken !== previousSettings.botToken) {
+        persistBotToken(settings.botToken ?? "");
+      }
+
       let botRestarted = false;
       let botAction: BotAction = "none";
       let botRestartMessage: string | undefined;
 
-      if (settings.botToken !== previousSettings.botToken) {
+      if (!skipBotRestart && settings.botToken !== previousSettings.botToken) {
         const result = await botManager.handleTokenChange(previousSettings.botToken, settings.botToken);
         botRestarted = result.triggered;
         botAction = result.action;
@@ -528,6 +545,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `[bot] ${botRestartMessage} (действие: ${botAction})`,
           );
         }
+      }
+
+      if (skipBotRestart && settings.botToken !== previousSettings.botToken) {
+        botRestartMessage =
+          botRestartMessage ??
+          "Скрипт перезапуска отключён (SKIP_BOT_RESTART_SCRIPT=1). Перезапустите контейнеры вручную.";
       }
 
       res.json({ settings, botRestarted, botAction, botRestartMessage });
