@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -e
-LOG_FILE="${RESTART_BOT_LOG:-/tmp/restart-bot.log}"
+DEFAULT_LOG="/project/data/restart-bot.log"
+LOG_FILE="${RESTART_BOT_LOG:-$DEFAULT_LOG}"
+TEE_LOG_FILE="${RESTART_BOT_TEE_LOG:-""}"
 
 log(){
   echo "[restart-bot] $*"
@@ -8,6 +10,10 @@ log(){
   if [ -n "$LOG_FILE" ]; then
     mkdir -p "$(dirname "$LOG_FILE")" || true
     echo "[restart-bot] $*" >>"$LOG_FILE" || true
+  fi
+  if [ -n "$TEE_LOG_FILE" ]; then
+    mkdir -p "$(dirname "$TEE_LOG_FILE")" || true
+    echo "[restart-bot] $*" >>"$TEE_LOG_FILE" || true
   fi
 }
 
@@ -34,6 +40,8 @@ if [ ! -d "$PROJ_DIR" ]; then
 fi
 log "project dir entries: $(ls -1 "$PROJ_DIR" | head -n 20 | tr '\n' ' ')"
 
+SELF_CONTAINER="$(hostname 2>/dev/null || true)"
+
 # выбираем доступную команду compose
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_BIN="docker compose"
@@ -52,9 +60,17 @@ fi
 
 TOKEN="$TELEGRAM_BOT_TOKEN"
 ACTION="${TELEGRAM_BOT_ACTION:-restart}"
-FULL_RESTART="${RESTART_ALL_ON_TOKEN_CHANGE:-1}"
+FULL_RESTART="${RESTART_ALL_ON_TOKEN_CHANGE:-0}"
 
-log "action=$ACTION full_restart=$FULL_RESTART token_len=${#TOKEN}" 
+# Если скрипт крутится внутри основного контейнера app, нельзя делать compose down —
+# контейнер самоуничтожится и скрипт завершится с ошибкой. В этом случае принудительно
+# оставляем только переcоздание сервиса бота.
+if [ "$SELF_CONTAINER" = "tattoobotadmin-app-1" ] && [ "$FULL_RESTART" = "1" ]; then
+  log "detected self container $SELF_CONTAINER, disabling full restart to avoid shutdown"
+  FULL_RESTART=0
+fi
+
+log "action=$ACTION full_restart=$FULL_RESTART token_len=${#TOKEN}"
 
 [ -n "$TOKEN" ] || { log "ERROR: TELEGRAM_BOT_TOKEN is empty"; exit 1; }
 command -v docker >/dev/null 2>&1 || { log "ERROR: docker CLI not found"; exit 1; }
@@ -62,6 +78,16 @@ if ! docker info >/dev/null 2>&1; then
   log "ERROR: docker daemon unreachable (check /var/run/docker.sock)"
   exit 1
 fi
+
+run_compose(){
+  CMD="$COMPOSE_BIN $*"
+  log "compose: $CMD"
+  # записываем stdout/stderr в лог для последующей диагностики
+  if ! sh -c "$CMD" >>"$LOG_FILE" 2>&1; then
+    log "ERROR: compose command failed (see $LOG_FILE)"
+    exit 1
+  fi
+}
 
 # пишем токен в env-файл, чтобы bot его подхватил через env_file
 mkdir -p "$(dirname "$BOT_ENV_FILE")"
@@ -78,20 +104,16 @@ if docker ps -a --format '{{.Names}}' | grep -q "^tatto_bot_host$"; then
 fi
 
 if [ "$FULL_RESTART" = "1" ] && [ "$ACTION" != "stop" ]; then
-  log "full stack restart (rebuild app+bot)"
-  set +e
-  $COMPOSE_BIN down --remove-orphans
-  DOWN_CODE=$?
-  log "compose down exit=$DOWN_CODE"
-  set -e
-  $COMPOSE_BIN up -d --build
+  log "full stack restart requested"
+  run_compose down --remove-orphans
+  run_compose up -d --build
 else
   log "stopping old bot container (if any)"
-  $COMPOSE_BIN stop "$COMPOSE_SERVICE_BOT" >/dev/null 2>&1 || true
+  run_compose stop "$COMPOSE_SERVICE_BOT" || true
   log "removing old bot container (if any)"
-  $COMPOSE_BIN rm -f "$COMPOSE_SERVICE_BOT" >/dev/null 2>&1 || true
-  log "rebuilding & starting bot with new token"
-  $COMPOSE_BIN up -d --build "$COMPOSE_SERVICE_BOT"
+  run_compose rm -f "$COMPOSE_SERVICE_BOT" || true
+  log "rebuilding & starting bot with new token (force recreate)"
+  run_compose up -d --build --force-recreate "$COMPOSE_SERVICE_BOT"
 fi
 
 log "done"
