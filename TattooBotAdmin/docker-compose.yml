@@ -81,10 +81,11 @@ services:
       - "443:443"
     volumes:
       - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/dhparam:/etc/nginx/dhparam:ro
       - ./nginx/vhost.d:/etc/nginx/vhost.d
       - ./nginx/html:/usr/share/nginx/html
       - ./nginx/conf.d:/etc/nginx/conf.d
-      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
 
   nginx-proxy-acme:
@@ -97,7 +98,7 @@ services:
       - ./nginx/certs:/etc/nginx/certs
       - ./nginx/vhost.d:/etc/nginx/vhost.d
       - ./nginx/html:/usr/share/nginx/html
-      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - nginx-proxy
     restart: unless-stopped

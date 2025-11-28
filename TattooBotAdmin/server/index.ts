@@ -63,7 +63,7 @@ app.use((req, res, next) => {
   const started = Date.now();
   const p = req.path;
   res.on("finish", () => {
-    if (!p.startsWith("/api")) return;
+    if (!p.startsWith("/api") || p === "/api/health") return;
     const status = res.statusCode;
     let line = `${req.method} ${p} ${status} in ${Date.now() - started}ms`;
     if (status >= 400) {
