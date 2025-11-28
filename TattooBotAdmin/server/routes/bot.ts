@@ -9,6 +9,44 @@ import { getStorage } from "../storage";
 
 const router = Router();
 
+async function notifyMasterOnNewBooking(booking: any) {
+  try {
+    if (!booking) return;
+    const storage = getStorage();
+    const settings = await storage.getSettings();
+    const token = (settings as any)?.botToken || process.env.BOT_TOKEN || process.env.TELEGRAM_TOKEN;
+    if (!token) {
+      console.warn("[bot-notify-master] missing botToken");
+      return;
+    }
+
+    const masterHandle = (booking.masterTelegram ?? "").trim();
+    if (!masterHandle) {
+      console.warn("[bot-notify-master] master has no telegram", booking.masterId);
+      return;
+    }
+
+    const chatId = masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`;
+    const when = `${booking.date ?? ""}${booking.time ? ` • ${booking.time}` : ""}`;
+    const text =
+      `Новая заявка от клиента.\n\n` +
+      `Услуга: ${booking.service || ""}\n` +
+      `Дата и время: ${when}\n` +
+      `Клиент: ${booking.clientName || ""}\n` +
+      `Телефон: ${booking.clientPhone || ""}\n` +
+      `Telegram: ${booking.clientTelegram ? `@${String(booking.clientTelegram).replace(/^@/, "")}` : "-"}\n` +
+      (booking.notes ? `Комментарий: ${booking.notes}\n` : "");
+
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch (e) {
+    console.warn("[bot-notify-master] failed", e);
+  }
+}
+
 const mastersQuerySchema = z.object({
   includeInactive: z
     .union([z.literal("true"), z.literal("false"), z.boolean()])
@@ -168,6 +206,7 @@ router.post("/bookings", async (req, res, next) => {
       status: "pending",
     });
     res.status(201).json({ booking });
+    notifyMasterOnNewBooking(booking);
   } catch (error) {
     const { status, message } = sanitizeError(error);
     if (status === 500) {

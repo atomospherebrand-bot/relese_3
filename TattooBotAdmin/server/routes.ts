@@ -144,6 +144,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
+  async function notifyMasterOnNewBooking(booking: any, storage: ReturnType<typeof getStorage>) {
+    try {
+      if (!booking) return;
+      const settings = await storage.getSettings();
+      const token = (settings as any)?.botToken || process.env.BOT_TOKEN || process.env.TELEGRAM_TOKEN;
+      if (!token) {
+        console.warn("[notify-master] missing botToken");
+        return;
+      }
+
+      const masterHandle = (booking.masterTelegram ?? "").trim();
+      if (!masterHandle) {
+        console.warn("[notify-master] master has no telegram", booking.masterId);
+        return;
+      }
+
+      const chatId = masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`;
+      const when = `${booking.date ?? ""}${booking.time ? ` • ${booking.time}` : ""}`;
+      const text =
+        `Новая заявка от клиента.\n\n` +
+        `Услуга: ${booking.service || ""}\n` +
+        `Дата и время: ${when}\n` +
+        `Клиент: ${booking.clientName || ""}\n` +
+        `Телефон: ${booking.clientPhone || ""}\n` +
+        `Telegram: ${booking.clientTelegram ? `@${String(booking.clientTelegram).replace(/^@/, "")}` : "-"}\n` +
+        (booking.notes ? `Комментарий: ${booking.notes}\n` : "");
+
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+    } catch (e) {
+      console.warn("notifyMasterOnNewBooking failed", e);
+    }
+  }
+
 
   api.get(
     "/health",
@@ -283,6 +320,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload = insertBookingSchema.parse(req.body);
       const booking = await storage.createBooking(payload);
       res.status(201).json({ booking });
+      notifyMasterOnNewBooking(booking, storage);
     }),
   );
 
@@ -635,7 +673,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     asyncHandler(async (_req, res) => {
       const tmpRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tattoo-backup-"));
       const dumpPath = path.join(tmpRoot, "db.sql");
-      const archivePath = path.join(tmpRoot, "backup.tar.gz");
+      const archivePath = path.join(os.tmpdir(), `tattoo-backup-${Date.now()}.tar.gz`);
 
       await execFile("pg_dump", ["--format=plain", "--no-owner", "--no-acl", `--dbname=${DATABASE_URL}`, "-f", dumpPath]);
 
@@ -661,6 +699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stream = fs.createReadStream(archivePath);
       stream.on("close", () => {
         fs.rmSync(tmpRoot, { recursive: true, force: true });
+        fs.rmSync(archivePath, { force: true });
       });
       stream.pipe(res);
     }),
