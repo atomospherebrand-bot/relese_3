@@ -47,6 +47,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     expose:
       - "6050"                       # порт доступен внутри сети докера, наружу не торчим
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6050/api/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
     restart: unless-stopped
 
   bot:
@@ -58,8 +63,8 @@ services:
     env_file:
       - ./bot-config/bot.env         # сюда скрипт пишет TELEGRAM_BOT_TOKEN
     environment:
-      # бот стучится в админку по HTTPS-домену
-      API_BASE: https://tatto.shadownet.live
+      # бот стучится в админку по внутреннему сервису, чтобы не зависеть от внешнего https
+      API_BASE: http://app:6050
     command: ["python", "/app/bot.py"]
     tmpfs:
       - /app/.env
