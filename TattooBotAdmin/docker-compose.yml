@@ -43,7 +43,7 @@ services:
       - ./:/project
       - ./scripts:/scripts:ro
       - ./uploads:/app/uploads       # том для медиа
-      - ./data:/app/data             # сохраняем график, акции и настройки
+      - app_data:/app/data           # сохраняем график, акции и настройки (persist)
       - /var/run/docker.sock:/var/run/docker.sock
     expose:
       - "6050"                       # порт доступен внутри сети докера, наружу не торчим
@@ -99,3 +99,4 @@ services:
 
 volumes:
   postgres_data:
+  app_data:

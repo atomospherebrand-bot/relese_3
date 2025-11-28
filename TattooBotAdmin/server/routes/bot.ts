@@ -10,23 +10,35 @@ import { getStorage } from "../storage";
 const router = Router();
 
 async function notifyMasterOnNewBooking(booking: any) {
+  const logPrefix = "[bot-notify-master]";
   try {
     if (!booking) return;
     const storage = getStorage();
     const settings = await storage.getSettings();
     const token = (settings as any)?.botToken || process.env.BOT_TOKEN || process.env.TELEGRAM_TOKEN;
     if (!token) {
-      console.warn("[bot-notify-master] missing botToken");
+      console.warn(`${logPrefix} missing botToken`);
       return;
     }
 
-    const masterHandle = (booking.masterTelegram ?? "").trim();
+    // Пытаемся достать телеграм мастера из брони, из справочника — и логируем для отладки.
+    let masterHandle = (booking.masterTelegram ?? "").trim();
+    if (!masterHandle && booking.masterId) {
+      try {
+        const masters = await storage.listMasters();
+        masterHandle = masters.find((m) => m.id === booking.masterId)?.telegram?.trim() ?? "";
+      } catch (err) {
+        console.warn(`${logPrefix} failed to load master list`, err);
+      }
+    }
+
     if (!masterHandle) {
-      console.warn("[bot-notify-master] master has no telegram", booking.masterId);
+      console.warn(`${logPrefix} master has no telegram`, booking.masterId);
       return;
     }
 
     let chatId: string | number = masterHandle.startsWith("@") ? masterHandle : `@${masterHandle}`;
+    console.log(`${logPrefix} resolving chat`, { masterId: booking.masterId, chatId });
     try {
       const lookup = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
         method: "POST",
@@ -37,9 +49,12 @@ async function notifyMasterOnNewBooking(booking: any) {
         const payload = await lookup.json();
         const resolved = payload?.result?.id;
         if (resolved) chatId = resolved;
+        console.log(`${logPrefix} getChat ok`, { chatId, resolved });
+      } else {
+        console.warn(`${logPrefix} getChat failed`, lookup.status, await lookup.text());
       }
     } catch (e) {
-      console.warn("[bot-notify-master] getChat failed", e);
+      console.warn(`${logPrefix} getChat error`, e);
     }
     const when = `${booking.date ?? ""}${booking.time ? ` • ${booking.time}` : ""}`;
     const text =
@@ -51,11 +66,16 @@ async function notifyMasterOnNewBooking(booking: any) {
       `Telegram: ${booking.clientTelegram ? `@${String(booking.clientTelegram).replace(/^@/, "")}` : "-"}\n` +
       (booking.notes ? `Комментарий: ${booking.notes}\n` : "");
 
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text }),
     });
+    if (!resp.ok) {
+      console.warn(`${logPrefix} sendMessage failed`, resp.status, await resp.text());
+    } else {
+      console.log(`${logPrefix} sent`, { chatId });
+    }
   } catch (e) {
     console.warn("[bot-notify-master] failed", e);
   }

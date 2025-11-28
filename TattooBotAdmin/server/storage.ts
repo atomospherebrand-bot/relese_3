@@ -575,6 +575,7 @@ export class DatabaseStorage {
   private writeDataFile(file: string, data: unknown) {
     this.ensureDataDir();
     fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf-8");
+    console.log(`[data-store] saved ${path.relative(process.cwd(), file)}`);
   }
 
   private readClientProfiles(): Record<string, any> {
