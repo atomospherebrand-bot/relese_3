@@ -2,8 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Save, Download, Upload } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,6 +13,9 @@ export function SettingsForm() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -67,6 +70,46 @@ export function SettingsForm() {
   const handleSave = () => {
     if (!settings) return;
     saveMutation.mutate(settings);
+  };
+
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      const blob = await api.exportBackup();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "tattoobot-backup.tar.gz";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({ title: "Экспорт готов", description: "Архив с данными скачан" });
+    } catch (error: any) {
+      toast({ title: "Не удалось экспортировать", description: error?.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImportSelect = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImport = async (file: File) => {
+    try {
+      setImporting(true);
+      await api.importBackup(file);
+      toast({ title: "Импорт завершён", description: "Данные и медиа восстановлены" });
+      queryClient.invalidateQueries();
+    } catch (error: any) {
+      toast({ title: "Не удалось импортировать", description: error?.message, variant: "destructive" });
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
   };
 
   if (settingsQuery.isLoading || !settings) {
@@ -252,6 +295,57 @@ export function SettingsForm() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-white/10 bg-[#121722] text-white">
+        <CardHeader>
+          <CardTitle>Резервные копии</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-white/60">
+            Скачайте архив с базой, медиа и настройками или загрузите его обратно для полного восстановления.
+          </p>
+
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleExport}
+              disabled={exporting}
+              className="gap-2 border border-white/10 bg-white/5 text-white hover:bg-white/10"
+              data-testid="button-backup-export"
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Готовим архив…" : "Экспортировать"}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleImportSelect}
+              disabled={importing}
+              className="gap-2 border-white/20 text-white hover:bg-white/10"
+              data-testid="button-backup-import"
+            >
+              <Upload className="h-4 w-4" />
+              {importing ? "Импортируем…" : "Импортировать"}
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".tar.gz,application/gzip"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleImport(file);
+              }}
+            />
+          </div>
+
+          <p className="text-xs text-white/40">
+            Архив включает дамп PostgreSQL, директорию data и все загрузки из uploads. Импорт перезапишет текущие данные.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

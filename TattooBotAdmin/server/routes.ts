@@ -6,6 +6,9 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
+import os from "os";
+import { promisify } from "util";
+import { execFile as execFileCb } from "child_process";
 import { getStorage } from "./storage";
 import { botManager } from "./botManager";
 function normalizeUrl(url?: string | null): string | undefined {
@@ -32,6 +35,7 @@ import { attachNotificationRoutes } from "./routes.notify";
 import { attachStatsRoutes } from "./routes.stats";
 
 const upload = multer({ storage: multer.memoryStorage() });
+const execFile = promisify(execFileCb);
 
 const asyncHandler = (handler: RequestHandler): RequestHandler => {
   return (req, res, next) => {
@@ -619,6 +623,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", "attachment; filename=bookings.xlsx");
       res.send(buffer);
+    }),
+  );
+
+  const DATABASE_URL =
+    process.env.DATABASE_URL || "postgresql://postgres:postgres@db:5432/tattooadmin";
+  const UPLOAD_DIR = process.env.UPLOAD_DIR || path.resolve(process.cwd(), "uploads");
+
+  api.get(
+    "/backup/export",
+    asyncHandler(async (_req, res) => {
+      const tmpRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tattoo-backup-"));
+      const dumpPath = path.join(tmpRoot, "db.sql");
+      const archivePath = path.join(tmpRoot, "backup.tar.gz");
+
+      await execFile("pg_dump", ["--format=plain", "--no-owner", "--no-acl", `--dbname=${DATABASE_URL}`, "-f", dumpPath]);
+
+      const dataDir = path.join(process.cwd(), "data");
+      if (fs.existsSync(dataDir)) {
+        await fs.promises.cp(dataDir, path.join(tmpRoot, "data"), { recursive: true });
+      }
+
+      if (fs.existsSync(UPLOAD_DIR)) {
+        await fs.promises.cp(UPLOAD_DIR, path.join(tmpRoot, "uploads"), { recursive: true });
+      }
+
+      await fs.promises.writeFile(
+        path.join(tmpRoot, "manifest.json"),
+        JSON.stringify({ createdAt: new Date().toISOString() }, null, 2),
+        "utf-8",
+      );
+
+      await execFile("tar", ["-czf", archivePath, "-C", tmpRoot, "."]);
+
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", "attachment; filename=tattoobot-backup.tar.gz");
+      const stream = fs.createReadStream(archivePath);
+      stream.on("close", () => {
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+      });
+      stream.pipe(res);
+    }),
+  );
+
+  api.post(
+    "/backup/import",
+    upload.single("file"),
+    asyncHandler(async (req, res) => {
+      if (!req.file) {
+        return res.status(400).json({ message: "Файл архива не получен" });
+      }
+
+      const tmpRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tattoo-restore-"));
+      const archivePath = path.join(tmpRoot, "import.tar.gz");
+      await fs.promises.writeFile(archivePath, req.file.buffer);
+
+      await execFile("tar", ["-xzf", archivePath, "-C", tmpRoot]);
+
+      const dumpPath = path.join(tmpRoot, "db.sql");
+      if (!fs.existsSync(dumpPath)) {
+        throw new Error("В архиве нет файла db.sql для восстановления");
+      }
+
+      await execFile("psql", [DATABASE_URL, "-c", "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"]);
+      await execFile("psql", [DATABASE_URL, "-f", dumpPath]);
+
+      const dataDir = path.join(process.cwd(), "data");
+      const extractedData = path.join(tmpRoot, "data");
+      if (fs.existsSync(extractedData)) {
+        await fs.promises.rm(dataDir, { recursive: true, force: true });
+        await fs.promises.cp(extractedData, dataDir, { recursive: true });
+      }
+
+      const extractedUploads = path.join(tmpRoot, "uploads");
+      if (fs.existsSync(extractedUploads)) {
+        await fs.promises.rm(UPLOAD_DIR, { recursive: true, force: true });
+        await fs.promises.cp(extractedUploads, UPLOAD_DIR, { recursive: true });
+      }
+
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+
+      res.json({ restored: true });
     }),
   );
 

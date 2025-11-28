@@ -516,4 +516,39 @@ export const api = {
   async deleteCertificate(id: string): Promise<void> {
     await request<void>(`/certs/${id}`, { method: "DELETE" });
   },
+
+  async exportBackup(): Promise<Blob> {
+    const response = await fetch(`${BASE_URL}/backup/export`, {
+      method: "GET",
+      headers: { "Cache-Control": "no-store", Pragma: "no-cache" },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || "Не удалось сделать экспорт");
+    }
+
+    return await response.blob();
+  },
+
+  async importBackup(file: File): Promise<void> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(`${BASE_URL}/backup/import`, {
+      method: "POST",
+      body: formData,
+      headers: { "Cache-Control": "no-store", Pragma: "no-cache" },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      let message = text;
+      try {
+        const parsed = JSON.parse(text);
+        message = parsed.message || text;
+      } catch {}
+      throw new Error(message || "Не удалось восстановить архив");
+    }
+  },
 };

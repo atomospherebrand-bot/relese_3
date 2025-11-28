@@ -14,8 +14,8 @@ RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
-# нужен docker-cli, чтобы скрипт мог делать `docker compose up -d bot`
-RUN apk add --no-cache docker-cli bash curl
+# нужен docker-cli, чтобы скрипт мог делать `docker compose up -d bot` и pg_dump/psql для бэкапов
+RUN apk add --no-cache docker-cli bash curl postgresql-client tar
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
