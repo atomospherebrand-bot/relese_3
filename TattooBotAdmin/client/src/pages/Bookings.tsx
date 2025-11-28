@@ -244,6 +244,8 @@ export default function Bookings() {
   const bookingsQuery = useQuery({
     queryKey: ["bookings"],
     queryFn: () => api.getBookings(),
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
   });
 
   const mastersQuery = useQuery({

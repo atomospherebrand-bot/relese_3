@@ -21,6 +21,8 @@ export default function Dashboard() {
   const dashboardQuery = useQuery({
     queryKey: ["dashboard"],
     queryFn: api.getDashboard,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
   });
 
   const bookings = React.useMemo(() => {

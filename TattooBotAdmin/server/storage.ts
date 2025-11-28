@@ -1059,7 +1059,11 @@ export class DatabaseStorage {
     });
 
     if (hasActive) {
-      throw new Error("У вас уже есть активная запись. Сначала завершите/отмените текущую.");
+      const error: any = new Error(
+        "У вас уже есть активная запись. Сначала завершите/отмените текущую.",
+      );
+      error.status = 409;
+      throw error;
     }
 
     const serviceRows = await this.database
