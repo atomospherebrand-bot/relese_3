@@ -1030,18 +1030,18 @@ export class DatabaseStorage {
     const cleanedUsername = (payload.clientUsername ?? payload.clientTelegram ?? "").replace(/^@/, "");
     const cleanedTelegramId = payload.telegramId ? String(payload.telegramId) : undefined;
 
-// Prevent multiple active future bookings by the same user (by telegram or phone)
-try {
-  const now = new Date();
-  const today = now.toISOString().slice(0,10);
-  const hh = String(now.getHours()).padStart(2,"0");
-  const mm = String(now.getMinutes()).padStart(2,"0");
-  const nowTime = hh + ":" + mm;
+    // Prevent multiple active future bookings by the same user (by telegram or phone)
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    const nowTime = `${hh}:${mm}`;
 
-      const byClient = await this.database
-        .select()
-        .from(bookingsTable)
-        .where(and(
+    const byClient = await this.database
+      .select()
+      .from(bookingsTable)
+      .where(
+        and(
           or(
             cleanedTelegramId ? eq(bookingsTable.telegramId, cleanedTelegramId) : sql`1=0`,
             cleanedUsername ? eq(bookingsTable.clientUsername, cleanedUsername) : sql`1=0`,
@@ -1049,21 +1049,18 @@ try {
             payload.clientPhone ? eq(bookingsTable.clientPhone, payload.clientPhone) : sql`1=0`
           ),
           ne(bookingsTable.status, "cancelled")
-        ));
+        )
+      );
 
-  const hasActive = byClient.some((b: any) => {
-    const d = String(b.date);
-    const t = typeof b.time === "string" ? b.time.slice(0,5) : String(b.time);
-    return (d > today) || (d === today && t >= nowTime);
-  });
+    const hasActive = byClient.some((b: any) => {
+      const d = String(b.date);
+      const t = typeof b.time === "string" ? b.time.slice(0, 5) : String(b.time);
+      return d > today || (d === today && t >= nowTime);
+    });
 
-  if (hasActive) {
-    throw new Error("У вас уже есть активная запись. Сначала завершите/отмените текущую.");
-  }
-} catch (e) {
-  // if anything goes wrong, do not block creating; but above throws explicit error
-}
-
+    if (hasActive) {
+      throw new Error("У вас уже есть активная запись. Сначала завершите/отмените текущую.");
+    }
 
     const serviceRows = await this.database
       .select()
